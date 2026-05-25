@@ -4,6 +4,21 @@ namespace App\Ai\Prompts;
 
 class HomeworkPrompt
 {
+    public static function buildForOllama(string $text, bool $hasImage, string $subjectHint = 'general education', string $gradeHint = 'unknown'): string
+    {
+        $context = trim($text) !== '' ? trim($text) : 'No text provided.';
+        $subjectHint = trim($subjectHint) !== '' ? $subjectHint : 'general education';
+
+        return implode("\n", [
+            'Solve this homework problem step by step. Return only valid JSON.',
+            '',
+            'Problem: ' . $context,
+            'Subject: ' . $subjectHint,
+            '',
+            'Return JSON: {"request_id":"<uuid>","subject":"<subject>","grade_level":"<grade>","problem":"<problem statement>","steps":["step1","step2"],"final_answer":"<answer>","learning_tip":"<tip>"}',
+        ]);
+    }
+
     public static function build(string $text, bool $hasImage, string $subjectHint = 'general education', string $gradeHint = 'unknown'): string
     {
         $cleanText = trim($text);

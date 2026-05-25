@@ -8,15 +8,13 @@ namespace App\Ai\Agents;
 use App\Ai\Prompts\HomeworkPrompt;
 use App\Ai\Services\ResponseParserService;
 use App\Models\User;
-use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Str;
 use Laravel\Ai\Contracts\Agent;
-use Laravel\Ai\Contracts\HasStructuredOutput;
 use Laravel\Ai\Promptable;
 use Laravel\Ai\Responses\AgentResponse;
 use Stringable;
 
-class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent, HasStructuredOutput
+class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent
 {
     use Promptable;
 
@@ -34,72 +32,37 @@ class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent, HasStr
         $subject = $input['subject_hint'] ?? 'general education';
         $grade = $input['grade_hint'] ?? 'unknown';
 
-        $prompt = HomeworkPrompt::build($text, $hasImage, $subject, $grade);
-        $provider = $this->resolveProvider((float) ($input['ocr_confidence'] ?? 0.0));
+        $provider = $this->resolveProvider((float) ($input['ocr_confidence'] ?? 0.0), $hasImage);
         $model = $this->resolveModel($provider);
+        $prompt = $provider === 'ollama'
+            ? HomeworkPrompt::buildForOllama($text, $hasImage, $subject, $grade)
+            : HomeworkPrompt::build($text, $hasImage, $subject, $grade);
 
         if ($provider === 'ollama' && !$this->connectivity->isOllamaReachable()) {
             throw new \RuntimeException('Ollama is not reachable on the host. Cannot process the request offline.');
         }
 
-        // Temporary debug — remove after fixing
-        if ($provider === 'ollama') {
-            \Log::info('Ollama URL being used', [
-                'url' => config('ai.providers.ollama.url'),
-                'model' => $model,
-            ]);
-        }
+        $timeout = $provider === 'ollama' ? 90 : 25;
 
         try {
-            $response = $this->prompt(
-                $prompt,
-                [],
-                $provider,
-                $model,
-                25 // Reduced from 30 to prevent 504 Gateway Timeout
-            );
+            $response = $this->prompt($prompt, [], $provider, $model, $timeout);
         } catch (\Throwable $exception) {
             report($exception);
 
-            if ($this->connectivity->isOnline() && $provider !== 'gemini') {
+            if ($provider === 'ollama' && $this->connectivity->isOnline()) {
                 $provider = 'gemini';
                 $model = $this->resolveModel($provider);
+                $prompt = HomeworkPrompt::build($text, $hasImage, $subject, $grade);
                 try {
-                    $response = $this->prompt(
-                        $prompt,
-                        [],
-                        $provider,
-                        $model,
-                        25 // 25 + 25 = 50s, safe from 60s Nginx timeout
-                    );
+                    $response = $this->prompt($prompt, [], $provider, $model, 25);
                 } catch (\Throwable $fallbackException) {
                     report($fallbackException);
-                    throw new \RuntimeException('Unable to complete the request using the cloud provider.', 0, $fallbackException);
+                    throw new \RuntimeException('Unable to complete the request using Ollama or cloud fallback.', 0, $fallbackException);
                 }
-            } elseif ($provider === 'ollama' && $model !== 'llama3.1:8b') {
-                $fallbackModel = 'llama3.1:8b';
-                try {
-                    $response = $this->prompt(
-                        $prompt,
-                        [],
-                        'ollama',
-                        $fallbackModel,
-                        25 // 25 + 25 = 50s, safe from 60s Nginx timeout
-                    );
-                    $model = $fallbackModel;
-                } catch (\Throwable $fallbackException) {
-                    report($fallbackException);
-                    throw new \RuntimeException('Unable to complete the homework request locally. Check that Ollama is reachable through the host proxy on port 11435.', 0, $fallbackException);
-                }
+            } elseif ($provider === 'gemini') {
+                throw new \RuntimeException('Unable to complete the request using the cloud provider.', 0, $exception);
             } else {
-                $msg = $provider === 'gemini' 
-                    ? 'Unable to complete the request using the cloud provider.'
-                    : 'Unable to complete the homework request locally. Check that Ollama is reachable through the host proxy on port 11435.';
-                throw new \RuntimeException(
-                    $msg,
-                    0,
-                    $exception
-                );
+                throw new \RuntimeException('Unable to complete the homework request locally. Check that Ollama is reachable.', 0, $exception);
             }
         }
 
@@ -112,11 +75,11 @@ class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent, HasStr
         $parsed['llm_confidence'] = isset($parsed['llm_confidence']) ? (float) $parsed['llm_confidence'] : (isset($input['llm_confidence']) ? (float) $input['llm_confidence'] : 0.0);
         $parsed['ocr_provider'] = $input['ocr_provider'] ?? ($parsed['ocr_provider'] ?? 'unknown');
         $parsed['ocr_model'] = $input['ocr_model'] ?? ($parsed['ocr_model'] ?? ($parsed['ocr_provider'] === 'gemini' ? config('ai.models.text.providers.gemini_ocr') ?? config('ai.models.text.providers.gemini') : 'tesseract'));
-        $parsed['llm_provider'] = $parsed['llm_provider'] ?? $provider;
-        $parsed['llm_model'] = $parsed['llm_model'] ?? $model;
-        $parsed['processed_offline'] = isset($parsed['processed_offline'])
-            ? (bool) $parsed['processed_offline']
-            : ($provider === 'ollama' && ($parsed['ocr_provider'] ?? 'tesseract') !== 'gemini' && ($input['ocr_mode'] ?? 'offline') === 'offline');
+        $parsed['llm_provider'] = $provider;
+        $parsed['llm_model'] = $model;
+        $parsed['processed_offline'] = $provider === 'ollama'
+            && ($input['ocr_provider'] ?? 'tesseract') !== 'gemini'
+            && ($input['ocr_mode'] ?? 'offline') === 'offline';
 
         return $parsed;
     }
@@ -135,30 +98,10 @@ class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent, HasStr
     protected function resolveModel(string $provider): string
     {
         return match ($provider) {
-            'ollama' => config('ai.models.text.providers.ollama') ?? 'llama3.1:8b',
+            'ollama' => config('ai.models.text.providers.ollama') ?? 'qwen2.5:1.5b',
             'gemini' => config('ai.models.text.providers.gemini') ?? 'gemini-3.1-flash-lite-preview',
             default => config('ai.models.text.providers.gemini') ?? 'gemini-3.1-flash-lite-preview',
         };
-    }
-      
-    public function schema(JsonSchema $schema): array
-    {
-        return [
-            'request_id' => $schema->string()->required(),
-            'subject' => $schema->string()->required(),
-            'grade_level' => $schema->string()->required(),
-            'problem' => $schema->string()->required(),
-            'steps' => $schema->array($schema->string())->required(),
-            'final_answer' => $schema->string()->required(),
-            'learning_tip' => $schema->string()->required(),
-            'ocr_confidence' => $schema->number()->required(),
-            'llm_confidence' => $schema->number()->required(),
-            'processed_offline' => $schema->boolean()->required(),
-            'ocr_provider' => $schema->string(),
-            'ocr_model' => $schema->string(),
-            'llm_provider' => $schema->string(),
-            'llm_model' => $schema->string(),
-        ];
     }
 
     

@@ -45,7 +45,8 @@ class Brain
         $tempPath = null;
 
         if (! empty($input['stored_image_path'] ?? null)) {
-            $candidate = storage_path('app/'.trim((string) $input['stored_image_path']));
+            $storedPath = trim((string) $input['stored_image_path']);
+            $candidate = \Illuminate\Support\Facades\Storage::disk('local')->path($storedPath);
             if (file_exists($candidate)) {
                 $imageSource = $candidate;
             } else {

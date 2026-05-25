@@ -3,6 +3,8 @@
 namespace App\Ai\Services;
 
 use App\Models\HomeworkRequest;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use InvalidArgumentException;
@@ -12,6 +14,7 @@ class HomeworkRequestPersistor
     public function storeHomeworkRequest(array $result, array $input): HomeworkRequest
     {
         $userId = $this->resolveUserId($input);
+        $this->ensureUserExists($userId, $input['role_name'] ?? null);
 
         return HomeworkRequest::create([
             'user_id' => $userId,
@@ -33,6 +36,24 @@ class HomeworkRequestPersistor
         }
 
         throw new InvalidArgumentException('Unable to persist homework request without a valid user_id.');
+    }
+
+    protected function ensureUserExists(string $userId, ?string $roleName = null): void
+    {
+        if (User::where('id', $userId)->exists()) {
+            return;
+        }
+
+        $roleId = null;
+        if ($roleName) {
+            $role = Role::firstOrCreate(['name' => strtolower(trim($roleName))]);
+            $roleId = $role->id;
+        }
+
+        User::forceCreate([
+            'id' => (int) $userId,
+            'role_id' => $roleId,
+        ]);
     }
 
     protected function buildRequestText(array $result): string

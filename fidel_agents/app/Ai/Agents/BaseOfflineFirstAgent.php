@@ -16,29 +16,23 @@ abstract class BaseOfflineFirstAgent implements Agent
 
     /**
      * Determine the provider dynamically at runtime.
+     * Prefers Ollama when reachable (offline-first); falls back to Gemini when online.
+     * Image requests prefer Gemini when online because the small Ollama model lacks vision.
      */
-    protected function resolveProvider(float $currentConfidence): string
+    protected function resolveProvider(float $currentConfidence, bool $hasImage = false): string
     {
         $isOnline = $this->connectivity->isOnline();
         $ollamaReachable = $this->connectivity->isOllamaReachable();
 
-        if (! $isOnline && ! $ollamaReachable) {
-            return 'ollama'; // Completely offline and Ollama down, let it fail natively
+        if ($hasImage && $isOnline) {
+            return 'gemini';
         }
 
-        if (! $isOnline) {
+        if ($ollamaReachable) {
             return 'ollama';
         }
 
-        if (! $ollamaReachable) {
-            return 'gemini'; // Online but Ollama down, avoid timeout
-        }
-
-        if ($currentConfidence === 0.0) {
-            return 'ollama';
-        }
-
-        if ($currentConfidence < $this->connectivity->llmConfidenceThreshold()) {
+        if ($isOnline) {
             return 'gemini';
         }
 

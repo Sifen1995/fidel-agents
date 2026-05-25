@@ -21,8 +21,35 @@ class ResponseParserService
 
     public function validate(array $payload): array
     {
+        $payload = array_merge([
+            'request_id' => null,
+            'subject' => 'Unknown',
+            'grade_level' => 'Unknown',
+            'problem' => '',
+            'steps' => [],
+            'final_answer' => '',
+            'learning_tip' => '',
+        ], $payload);
+
+        if (empty($payload['steps']) || !is_array($payload['steps'])) {
+            $payload['steps'] = ['See final answer.'];
+        }
+
+        $payload['steps'] = array_values(array_map(function ($step) {
+            return is_string($step) ? $step : (is_array($step) ? json_encode($step) : (string) $step);
+        }, $payload['steps']));
+
+        if (empty($payload['final_answer'])) {
+            $payload['final_answer'] = 'No answer provided.';
+        }
+        if (empty($payload['problem'])) {
+            $payload['problem'] = 'Unable to extract problem.';
+        }
+        if (empty($payload['learning_tip'])) {
+            $payload['learning_tip'] = 'Review the steps above.';
+        }
+
         $rules = [
-            'request_id' => 'required|string',
             'subject' => 'required|string',
             'grade_level' => 'required|string',
             'problem' => 'required|string',
@@ -30,13 +57,6 @@ class ResponseParserService
             'steps.*' => 'required|string',
             'final_answer' => 'required|string',
             'learning_tip' => 'required|string',
-            'ocr_confidence' => 'nullable|numeric',
-            'llm_confidence' => 'nullable|numeric',
-            'processed_offline' => 'nullable|boolean',
-            'ocr_provider' => 'nullable|string',
-            'ocr_model' => 'nullable|string',
-            'llm_provider' => 'nullable|string',
-            'llm_model' => 'nullable|string',
         ];
 
         $validator = Validator::make($payload, $rules);

@@ -26,6 +26,7 @@ return [
             'driver' => 'ollama',
             'key' => env('OLLAMA_API_KEY', ''),
             'url' => env('OLLAMA_BASE_URL', 'http://host.docker.internal:11434'),
+            'timeout' => 120,
         ],
 
         'gemini' => [
