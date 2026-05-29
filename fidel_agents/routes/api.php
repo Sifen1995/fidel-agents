@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\HomeworkDemoController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AiRequestController;
 
@@ -21,5 +22,7 @@ Route::prefix('ai')->group(function () {
             'service' => 'brain'
         ]);
     });
+
+    Route::get('/status', [HomeworkDemoController::class, 'status']);
 
 });

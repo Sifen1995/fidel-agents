@@ -10,12 +10,33 @@ class HomeworkPrompt
         $subjectHint = trim($subjectHint) !== '' ? $subjectHint : 'general education';
 
         return implode("\n", [
-            'Solve this homework problem step by step. Return only valid JSON.',
+            'Solve this homework problem step by step.',
+            'Reply with ONLY one JSON object. No markdown fences. No text before or after the JSON.',
             '',
             'Problem: ' . $context,
             'Subject: ' . $subjectHint,
+            'Grade: ' . $gradeHint,
             '',
-            'Return JSON: {"request_id":"<uuid>","subject":"<subject>","grade_level":"<grade>","problem":"<problem statement>","steps":["step1","step2"],"final_answer":"<answer>","learning_tip":"<tip>"}',
+            'Rules:',
+            '- "steps" must be ONE array of strings: "steps": ["first step", "second step", "third step"]',
+            '- Never use multiple arrays for steps (wrong: ["a"], ["b"]).',
+            '- Use double quotes for all strings. Escape quotes inside strings.',
+            '',
+            'Template:',
+            '{"request_id":"1","subject":"Mathematics","grade_level":"9th grade","problem":"<restated problem>","steps":["<step 1>","<step 2>"],"final_answer":"<answer>","learning_tip":"<short tip>"}',
+        ]);
+    }
+
+    public static function buildJsonRepair(string $invalidOutput): string
+    {
+        return implode("\n", [
+            'The previous response was invalid JSON. Fix it.',
+            'Return ONLY one valid JSON object with keys: request_id, subject, grade_level, problem, steps, final_answer, learning_tip.',
+            '"steps" must be a single array of strings.',
+            'No markdown. No explanation outside the JSON.',
+            '',
+            'Broken output to fix:',
+            $invalidOutput,
         ]);
     }
 

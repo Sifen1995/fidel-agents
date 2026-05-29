@@ -9,6 +9,7 @@ use App\Ai\Prompts\HomeworkPrompt;
 use App\Ai\Services\ResponseParserService;
 use App\Models\User;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Promptable;
 use Laravel\Ai\Responses\AgentResponse;
@@ -67,8 +68,27 @@ class HomeworkHelperAgent extends BaseOfflineFirstAgent implements Agent
         }
 
         $rawText = (string) $response;
-        $parsed = $this->parser->parse($rawText);
-        $parsed = $this->parser->validate($parsed);
+        $parseContext = [
+            'problem' => $text !== '' ? $text : 'Homework problem',
+            'subject' => $subject,
+            'grade_level' => $grade,
+        ];
+
+        try {
+            $parsed = $this->parser->parseLenient($rawText, $parseContext);
+        } catch (ValidationException $parseException) {
+            if ($provider !== 'ollama') {
+                throw $parseException;
+            }
+
+            $repairPrompt = HomeworkPrompt::buildJsonRepair($rawText);
+            try {
+                $response = $this->prompt($repairPrompt, [], $provider, $model, $timeout);
+                $parsed = $this->parser->parseLenient((string) $response, $parseContext);
+            } catch (\Throwable) {
+                throw $parseException;
+            }
+        }
 
         $parsed['request_id'] = $parsed['request_id'] ?? (string) Str::uuid();
         $parsed['ocr_confidence'] = isset($parsed['ocr_confidence']) ? (float) $parsed['ocr_confidence'] : (isset($input['ocr_confidence']) ? (float) $input['ocr_confidence'] : 0.0);
