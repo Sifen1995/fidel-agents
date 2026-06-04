@@ -207,6 +207,12 @@ curl -X POST http://localhost:8080/api/ai/ask \
 | `GET` | `/api/ai/status` | Online and Ollama reachability status |
 | `GET` | `/homework` | Interactive homework demo UI |
 
+
+Open it in the browser
+URL	Route
+http://localhost:8080/homework
+
+
 ## Testing
 
 ```bash

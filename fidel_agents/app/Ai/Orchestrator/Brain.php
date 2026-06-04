@@ -9,6 +9,7 @@ use App\Ai\Agents\StudyRecommenderAgent;
 use App\Ai\Services\IntentClassifier;
 use App\Ai\Services\OcrService;
 use App\Http\Controllers\Api\HomeworkController;
+use App\Http\Controllers\Api\RecommendController;
 use App\Http\Requests\HomeworkSubmitRequest;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -22,6 +23,8 @@ class Brain
 
     public function handle(array $input): array
     {
+        $input = $this->normalise($input);
+
         $input = $this->prepareImagePayload($input);
 
         $explicitIntent = $this->extractExplicitIntent($input);
@@ -84,6 +87,45 @@ class Brain
         return $input;
     }
 
+    /**
+     * Decode multipart JSON fields and shape recommend payloads before routing.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private function normalise(array $input): array
+    {
+        foreach (['quiz_results', 'completed_videos', 'content_catalogue'] as $field) {
+            if (! isset($input[$field]) || ! is_string($input[$field])) {
+                continue;
+            }
+
+            $decoded = json_decode($input[$field], true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $input[$field] = $decoded;
+            }
+        }
+
+        $hasImage = ! empty($input['image_base64'] ?? null)
+            || ! empty($input['stored_image_path'] ?? null)
+            || ! empty($input['image'] ?? null)
+            || ! empty($input['image_url'] ?? null);
+
+        if (! $hasImage && ! empty($input['quiz_results']) && is_array($input['quiz_results'])) {
+            $input['student_id'] = $input['student_id'] ?? null;
+            $input['grade_level'] = $input['grade_level'] ?? null;
+            $input['quiz_results'] = $input['quiz_results'];
+            $input['completed_videos'] = is_array($input['completed_videos'] ?? null)
+                ? $input['completed_videos']
+                : [];
+            $input['content_catalogue'] = is_array($input['content_catalogue'] ?? null)
+                ? $input['content_catalogue']
+                : [];
+        }
+
+        return $input;
+    }
+
     private function dispatch(string $intent, array $input, string $source): array
     {
         if ($intent === 'homework') {
@@ -97,6 +139,10 @@ class Brain
             app(HomeworkController::class)->store($result, $input);
         }
 
+        if ($intent === 'recommender') {
+            app(RecommendController::class)->store($result, $input);
+        }
+
         $result['intent'] = $intent;
         $result['intent_source'] = $source;
 
@@ -107,7 +153,7 @@ class Brain
     {
         return match ($intent) {
             'homework' => app(HomeworkHelperAgent::class),
-            'recommender' => new StudyRecommenderAgent(),
+            'recommender' => app(StudyRecommenderAgent::class),
             'exam_prep' => new ExamPrepAgent(),
             'helpdesk' => new HelpdeskAgent(),
             default => new HelpdeskAgent(),
@@ -194,6 +240,10 @@ class Brain
 
         if ($hasImage) {
             return 'homework';
+        }
+
+        if (! empty($input['quiz_results']) && is_array($input['quiz_results'])) {
+            return 'recommender';
         }
 
         $examKeys = ['exam', 'exam_name', 'exam_schedule', 'days_remaining', 'time_remaining', 'time_remaining_minutes', 'weak_topics'];

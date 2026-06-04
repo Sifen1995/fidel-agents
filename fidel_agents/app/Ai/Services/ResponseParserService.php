@@ -305,4 +305,108 @@ class ResponseParserService
 
         return $json;
     }
+
+    /**
+     * Parse study-recommender LLM output and validate catalogue content_ids.
+     *
+     * @param  list<array<string, mixed>>  $allowedCatalogue
+     * @param  array{focus_subject?: string, grade_level?: string}  $context
+     */
+    public function parseRecommendLenient(string $raw, array $allowedCatalogue, array $context = []): array
+    {
+        $raw = trim($raw);
+        $payload = $this->decodeJson($raw);
+
+        if (! is_array($payload)) {
+            throw ValidationException::withMessages(['response' => ['Unable to parse AI response as valid JSON.']]);
+        }
+
+        $allowedIds = [];
+        foreach ($allowedCatalogue as $item) {
+            if (! empty($item['id'])) {
+                $allowedIds[(string) $item['id']] = true;
+            }
+        }
+
+        $payload['focus_subject'] = (string) ($payload['focus_subject'] ?? $context['focus_subject'] ?? 'General');
+        $payload['reason'] = (string) ($payload['reason'] ?? 'Focus on improving in this subject.');
+        $payload['study_plan'] = (string) ($payload['study_plan'] ?? '30 minutes daily for 5 days');
+        $payload['motivational_tip'] = (string) ($payload['motivational_tip'] ?? 'Keep practicing — steady progress adds up.');
+
+        $recommendations = $payload['recommendations'] ?? [];
+        if (! is_array($recommendations)) {
+            $recommendations = [];
+        }
+
+        $validatedRecommendations = [];
+        foreach ($recommendations as $rec) {
+            if (! is_array($rec)) {
+                continue;
+            }
+            $contentId = (string) ($rec['content_id'] ?? '');
+            if ($contentId === '' || ! isset($allowedIds[$contentId])) {
+                continue;
+            }
+            $validatedRecommendations[] = [
+                'type' => (string) ($rec['type'] ?? 'video'),
+                'title' => (string) ($rec['title'] ?? ''),
+                'content_id' => $contentId,
+            ];
+        }
+
+        if ($validatedRecommendations === [] && $allowedCatalogue !== []) {
+            $first = $allowedCatalogue[0];
+            $validatedRecommendations[] = [
+                'type' => (string) ($first['type'] ?? 'video'),
+                'title' => (string) ($first['title'] ?? 'Recommended content'),
+                'content_id' => (string) ($first['id'] ?? ''),
+            ];
+        }
+
+        $payload['recommendations'] = $validatedRecommendations;
+
+        $dailyBreakdown = $payload['daily_breakdown'] ?? [];
+        if (! is_array($dailyBreakdown) || $dailyBreakdown === []) {
+            $dailyBreakdown = [
+                ['day' => 1, 'task' => 'Review weak subject fundamentals'],
+                ['day' => 2, 'task' => 'Watch one recommended video'],
+                ['day' => 3, 'task' => 'Practice quiz questions'],
+                ['day' => 4, 'task' => 'Re-watch and take notes'],
+                ['day' => 5, 'task' => 'Short self-test on the topic'],
+            ];
+        }
+
+        $payload['daily_breakdown'] = array_values(array_map(function ($day) {
+            if (! is_array($day)) {
+                return ['day' => 1, 'task' => (string) $day];
+            }
+
+            return [
+                'day' => (int) ($day['day'] ?? 1),
+                'task' => (string) ($day['task'] ?? 'Study session'),
+            ];
+        }, $dailyBreakdown));
+
+        $rules = [
+            'focus_subject' => 'required|string',
+            'reason' => 'required|string',
+            'recommendations' => 'required|array|min:1',
+            'recommendations.*.type' => 'required|string',
+            'recommendations.*.title' => 'required|string',
+            'recommendations.*.content_id' => 'required|string',
+            'study_plan' => 'required|string',
+            'daily_breakdown' => 'required|array|min:1',
+            'daily_breakdown.*.day' => 'required|integer',
+            'daily_breakdown.*.task' => 'required|string',
+            'motivational_tip' => 'required|string',
+        ];
+
+        $validator = Validator::make($payload, $rules);
+
+        if ($validator->fails()) {
+            throw ValidationException::withMessages($validator->errors()->toArray());
+        }
+
+        return $payload;
+    }
 }
