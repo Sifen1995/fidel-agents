@@ -93,4 +93,69 @@ class RuleEngineService
 
         return $averages;
     }
+
+    /**
+     * Rank exam syllabus topics by study priority.
+     *
+     * priority_score = weight × (100 - score). Higher score = needs more study time.
+     *
+     * @param  list<array{topic?: string, weight?: float|int}>  $syllabusTopics
+     * @param  list<array{topic?: string, score?: float|int}>  $studentScores
+     * @return list<array{topic: string, weight: float, score: float, priority_score: float, weakness: string}>
+     */
+    public function analyseExamTopics(array $syllabusTopics, array $studentScores): array
+    {
+        $scoresByTopic = [];
+        foreach ($studentScores as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $topic = trim((string) ($row['topic'] ?? ''));
+            if ($topic === '') {
+                continue;
+            }
+            $scoresByTopic[strtolower($topic)] = (float) ($row['score'] ?? 50);
+        }
+
+        $ranked = [];
+        foreach ($syllabusTopics as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $topic = trim((string) ($row['topic'] ?? ''));
+            if ($topic === '') {
+                continue;
+            }
+
+            $weight = (float) ($row['weight'] ?? 0);
+            $score = $scoresByTopic[strtolower($topic)] ?? 50.0;
+            $priorityScore = round($weight * (100 - $score), 2);
+
+            $ranked[] = [
+                'topic' => $topic,
+                'weight' => $weight,
+                'score' => $score,
+                'priority_score' => $priorityScore,
+                'weakness' => $this->weaknessLevel($score),
+            ];
+        }
+
+        usort($ranked, fn (array $a, array $b): int => $b['priority_score'] <=> $a['priority_score']);
+
+        return $ranked;
+    }
+
+    private function weaknessLevel(float $score): string
+    {
+        if ($score < 50) {
+            return 'high';
+        }
+
+        if ($score < 70) {
+            return 'medium';
+        }
+
+        return 'low';
+    }
 }

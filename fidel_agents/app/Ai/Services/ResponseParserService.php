@@ -409,4 +409,101 @@ class ResponseParserService
 
         return $payload;
     }
+
+    /**
+     * Parse exam-prep LLM output.
+     *
+     * @param  list<array{topic: string, weakness: string, priority_score: float|int}>  $expectedPriorityTopics
+     * @param  array{exam?: string, exam_date?: string, days_remaining?: int}  $context
+     */
+    public function parseExamLenient(string $raw, array $expectedPriorityTopics, array $context = []): array
+    {
+        $raw = trim($raw);
+        $payload = $this->decodeJson($raw);
+
+        if (! is_array($payload)) {
+            throw ValidationException::withMessages(['response' => ['Unable to parse AI response as valid JSON.']]);
+        }
+
+        $payload['exam'] = (string) ($payload['exam'] ?? $context['exam'] ?? 'Exam');
+        $payload['exam_date'] = (string) ($payload['exam_date'] ?? $context['exam_date'] ?? '');
+        $payload['days_remaining'] = (int) ($payload['days_remaining'] ?? $context['days_remaining'] ?? 0);
+        $payload['confidence_tip'] = (string) ($payload['confidence_tip'] ?? 'Stay focused — consistent practice builds confidence.');
+
+        $priorityTopics = $payload['priority_topics'] ?? $expectedPriorityTopics;
+        if (! is_array($priorityTopics) || $priorityTopics === []) {
+            $priorityTopics = $expectedPriorityTopics;
+        }
+
+        $payload['priority_topics'] = array_values(array_map(function ($topic) {
+            if (! is_array($topic)) {
+                return ['topic' => (string) $topic, 'weakness' => 'medium', 'priority_score' => 0.0];
+            }
+
+            return [
+                'topic' => (string) ($topic['topic'] ?? ''),
+                'weakness' => (string) ($topic['weakness'] ?? 'medium'),
+                'priority_score' => (float) ($topic['priority_score'] ?? 0),
+            ];
+        }, $priorityTopics));
+
+        $dailyPlan = $payload['daily_plan'] ?? [];
+        if (! is_array($dailyPlan) || $dailyPlan === []) {
+            $dailyPlan = [['day' => 1, 'task' => 'Review highest priority topic']];
+        }
+
+        $payload['daily_plan'] = array_values(array_map(function ($day) {
+            if (! is_array($day)) {
+                return ['day' => 1, 'task' => (string) $day];
+            }
+
+            return [
+                'day' => (int) ($day['day'] ?? 1),
+                'task' => (string) ($day['task'] ?? 'Study session'),
+            ];
+        }, $dailyPlan));
+
+        $practiceQuestions = $payload['practice_questions'] ?? [];
+        if (! is_array($practiceQuestions)) {
+            $practiceQuestions = [];
+        }
+
+        $payload['practice_questions'] = array_values(array_map(function ($question) {
+            if (! is_array($question)) {
+                return ['topic' => 'General', 'question' => (string) $question, 'difficulty' => 'medium'];
+            }
+
+            return [
+                'topic' => (string) ($question['topic'] ?? 'General'),
+                'question' => (string) ($question['question'] ?? ''),
+                'difficulty' => (string) ($question['difficulty'] ?? 'medium'),
+            ];
+        }, $practiceQuestions));
+
+        $rules = [
+            'exam' => 'required|string',
+            'exam_date' => 'required|string',
+            'days_remaining' => 'required|integer',
+            'priority_topics' => 'required|array|min:1',
+            'priority_topics.*.topic' => 'required|string',
+            'priority_topics.*.weakness' => 'required|string',
+            'priority_topics.*.priority_score' => 'required|numeric',
+            'daily_plan' => 'required|array|min:1',
+            'daily_plan.*.day' => 'required|integer',
+            'daily_plan.*.task' => 'required|string',
+            'practice_questions' => 'required|array|min:1',
+            'practice_questions.*.topic' => 'required|string',
+            'practice_questions.*.question' => 'required|string',
+            'practice_questions.*.difficulty' => 'required|string',
+            'confidence_tip' => 'required|string',
+        ];
+
+        $validator = Validator::make($payload, $rules);
+
+        if ($validator->fails()) {
+            throw ValidationException::withMessages($validator->errors()->toArray());
+        }
+
+        return $payload;
+    }
 }

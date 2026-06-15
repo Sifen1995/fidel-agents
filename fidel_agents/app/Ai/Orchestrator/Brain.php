@@ -9,8 +9,10 @@ use App\Ai\Agents\StudyRecommenderAgent;
 use App\Ai\Services\IntentClassifier;
 use App\Ai\Services\OcrService;
 use App\Http\Controllers\Api\HomeworkController;
+use App\Http\Controllers\Api\ExamPrepController;
 use App\Http\Controllers\Api\RecommendController;
 use App\Http\Requests\HomeworkSubmitRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -23,6 +25,12 @@ class Brain
 
     public function handle(array $input): array
     {
+        if (strtolower(trim((string) ($input['is_exam_active'] ?? 'false'))) === 'true') {
+            throw new HttpResponseException(response()->json([
+                'message' => 'Cannot access exam prep during an active exam session',
+            ], 403));
+        }
+
         $input = $this->normalise($input);
 
         $input = $this->prepareImagePayload($input);
@@ -95,7 +103,7 @@ class Brain
      */
     private function normalise(array $input): array
     {
-        foreach (['quiz_results', 'completed_videos', 'content_catalogue'] as $field) {
+        foreach (['quiz_results', 'completed_videos', 'content_catalogue', 'syllabus_topics', 'student_scores'] as $field) {
             if (! isset($input[$field]) || ! is_string($input[$field])) {
                 continue;
             }
@@ -123,6 +131,23 @@ class Brain
                 : [];
         }
 
+        if (! $hasImage && empty($input['quiz_results']) && ! empty($input['exam_subject'])) {
+            $input['exam_subject'] = (string) $input['exam_subject'];
+            $input['exam_date'] = (string) ($input['exam_date'] ?? '');
+            $input['student_id'] = (string) ($input['student_id'] ?? '');
+            $input['grade_level'] = (string) ($input['grade_level'] ?? '');
+            $input['days_remaining'] = (int) ($input['days_remaining'] ?? 0);
+            $input['syllabus_topics'] = is_array($input['syllabus_topics'] ?? null)
+                ? $input['syllabus_topics']
+                : [];
+            $input['student_scores'] = is_array($input['student_scores'] ?? null)
+                ? $input['student_scores']
+                : [];
+            $input['completed_videos'] = is_array($input['completed_videos'] ?? null)
+                ? $input['completed_videos']
+                : [];
+        }
+
         return $input;
     }
 
@@ -143,6 +168,10 @@ class Brain
             app(RecommendController::class)->store($result, $input);
         }
 
+        if ($intent === 'exam_prep') {
+            app(ExamPrepController::class)->store($result, $input);
+        }
+
         $result['intent'] = $intent;
         $result['intent_source'] = $source;
 
@@ -154,7 +183,7 @@ class Brain
         return match ($intent) {
             'homework' => app(HomeworkHelperAgent::class),
             'recommender' => app(StudyRecommenderAgent::class),
-            'exam_prep' => new ExamPrepAgent(),
+            'exam_prep' => app(ExamPrepAgent::class),
             'helpdesk' => new HelpdeskAgent(),
             default => new HelpdeskAgent(),
         };
@@ -246,11 +275,8 @@ class Brain
             return 'recommender';
         }
 
-        $examKeys = ['exam', 'exam_name', 'exam_schedule', 'days_remaining', 'time_remaining', 'time_remaining_minutes', 'weak_topics'];
-        foreach ($examKeys as $key) {
-            if (!empty($input[$key] ?? null)) {
-                return 'exam_prep';
-            }
+        if (! empty($input['exam_subject'])) {
+            return 'exam_prep';
         }
 
         $recoKeys = ['weak_subjects', 'completed_videos', 'completed_topics', 'grade_level', 'weak_topics'];
