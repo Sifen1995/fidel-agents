@@ -83,6 +83,62 @@ fidel-agents/
 - A pulled Ollama model, e.g. `ollama pull qwen2.5:1.5b`
 - (Optional) Google Gemini API key for cloud fallback and vision OCR
 
+## Ollama Setup
+
+### Installation
+
+1. **Download and install Ollama** from [ollama.com](https://ollama.com/)
+   - On macOS and Windows, run the installer
+   - On Linux, use:
+     ```bash
+     curl -fsSL https://ollama.ai/install.sh | sh
+     ```
+
+2. **Start the Ollama service**
+   - macOS: Ollama runs automatically after installation
+   - Windows: Start Ollama from the applications menu
+   - Linux:
+     ```bash
+     ollama serve
+     ```
+
+### Pull a model
+
+Pull one or more models to use with Fidel Agents. Common options:
+
+```bash
+# Recommended for fast inference (1.5B parameters)
+ollama pull qwen2.5:1.5b
+
+# Alternative lightweight models
+ollama pull llama2:7b
+ollama pull mistral:7b
+ollama pull neural-chat:7b
+
+# Larger models (if you have sufficient VRAM)
+ollama pull qwen2.5:7b
+ollama pull qwen2.5:14b
+```
+
+### Verify Ollama is running
+
+Check that Ollama is accessible and ready:
+
+```bash
+# Test local Ollama endpoint
+curl http://localhost:11434/api/tags
+# Should return JSON with your pulled models
+
+# Or test with a simple request
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5:1.5b",
+    "prompt": "Hello",
+    "stream": false
+  }'
+```
+
 ## Quick start (Docker)
 
 ```bash
